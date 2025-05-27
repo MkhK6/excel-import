@@ -87,6 +87,7 @@ class ImportService
                     $this->updateProgress($processed, $total);
 
                     event(new ImportProgress([
+                        'progress_key' => $this->progressKey,
                         'processed' => $processed,
                         'total' => $total
                     ]));
@@ -102,6 +103,7 @@ class ImportService
             $this->updateProgress($processed, $total);
 
             event(new ImportProgress([
+                'progress_key' => $this->progressKey,
                 'processed' => $processed,
                 'total' => $total
             ]));
@@ -122,12 +124,10 @@ class ImportService
         try {
             $validated = $this->validator->validate($dto);
 
-            $date = Carbon::createFromFormat('d.m.Y', $validated['date']);
-
             ImportedRow::create([
                 'external_id' => $validated['id'],
                 'name' => $validated['name'],
-                'date' => $date->format('Y-m-d')
+                'date' => Carbon::parse($validated['date'])->format('d.m.Y')
             ]);
         } catch (ValidationException $e) {
             $this->errors[$rowNumber] = $e->validator->errors()->all();

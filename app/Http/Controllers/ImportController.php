@@ -20,7 +20,7 @@ class ImportController extends Controller
 
         $absolutePath = Storage::path($tempPath);
 
-        $progressKey = 'import:progress:' . uniqid();
+        $progressKey = 'import_progress_' . uniqid();
 
         ImportJob::dispatch($absolutePath, $progressKey)->onQueue('imports');
 

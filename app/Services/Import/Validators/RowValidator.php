@@ -25,7 +25,7 @@ class RowValidator
                 'required',
                 function ($attribute, $value, $fail) {
                     if (!$this->isValidDate($value)) {
-                        $fail("Неверный формат даты");
+                        $fail("Неверный формат даты.");
                     }
                 }
             ]
@@ -41,27 +41,17 @@ class RowValidator
         }
 
         $validated = $validator->validated();
-        $validated['date'] = $this->normalizeDate($validated['date']);
 
         return $validated;
     }
 
-    private function isValidDate(string $date): bool
+    private function isValidDate($date): bool
     {
         try {
             Carbon::parse($date);
             return true;
         } catch (\Exception $e) {
             return false;
-        }
-    }
-
-    private function normalizeDate(string $date): string
-    {
-        try {
-            return Carbon::parse($date)->format('d.m.Y');
-        } catch (\Exception $e) {
-            return $date;
         }
     }
 }

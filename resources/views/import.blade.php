@@ -60,7 +60,8 @@
             formData.append('file', document.getElementById('file').files[0]);
             formData.append('_token', '{{ csrf_token() }}');
 
-            document.getElementById('progressContainer').style.display = 'block';
+            const progressContainer = document.getElementById('progressContainer');
+            progressContainer.style.display = 'block';
 
             fetch('/api/import', {
                     method: 'POST',
@@ -69,53 +70,52 @@
                 .then(response => response.json())
                 .then(data => {
                     const progressKey = data.progress_key;
+
+                    function updateProgress(processed, total) {
+                        const progressBar = document.getElementById('progressBar');
+                        const progressText = document.getElementById('progressText');
+
+                        const percentage = Math.round((processed / total) * 100);
+
+                        progressBar.style.width = `${percentage}%`;
+                        progressBar.setAttribute('aria-valuenow', percentage);
+                        progressText.textContent = `${percentage}% (${processed} of ${total} rows processed)`;
+
+                        if (processed === total) {
+                            showResults();
+                        }
+                    }
+
+                    function showResults() {
+                        const resultContainer = document.getElementById('resultContainer');
+                        resultContainer.style.display = 'block';
+
+                        fetch('/storage/result.txt')
+                            .then(response => {
+                                if (response.ok) {
+                                    return response.text();
+                                }
+                                return Promise.reject();
+                            })
+                            .then(text => {
+                                if (text.trim().length > 0) {
+                                    document.getElementById('errorsContainer').style.display = 'block';
+                                    document.getElementById('errorContent').textContent = text;
+                                }
+                            })
+                            .catch(() => {});
+                    }
+
+                    window.Echo.channel(`import-progress.${progressKey}`)
+                        .listen('.import.progress', (e) => {
+                            updateProgress(e.progressData.processed, e.progressData.total);
+                        });
                 })
                 .catch(error => {
                     console.error('Error:', error);
                     alert('An error occurred during import');
                 });
         });
-
-        function showResults() {
-            const resultContainer = document.getElementById('resultContainer');
-            resultContainer.style.display = 'block';
-
-            fetch('/storage/result.txt')
-                .then(response => {
-                    if (response.ok) {
-                        return response.text();
-                    }
-                    return Promise.reject();
-                })
-                .then(text => {
-                    if (text.trim().length > 0) {
-                        document.getElementById('errorsContainer').style.display = 'block';
-                        document.getElementById('errorContent').textContent = text;
-                    }
-                })
-                .catch(() => {});
-        }
-
-        function updateProgress(processed, total) {
-            const progressBar = document.getElementById('progressBar');
-            const progressText = document.getElementById('progressText');
-
-            const percentage = Math.round((processed / total) * 100);
-
-            progressBar.style.width = `${percentage}%`;
-            progressBar.setAttribute('aria-valuenow', percentage);
-            progressText.textContent = `${percentage}% (${processed} of ${total} rows processed)`;
-
-            if (processed === total) {
-                showResults();
-            }
-        }
-
-        window.Echo.channel('imports')
-            .listen('.import.progress', (e) => {
-                const progressData = e.progressData;
-                updateProgress(progressData.processed, progressData.total);
-            });
     });
 </script>
 @endsection

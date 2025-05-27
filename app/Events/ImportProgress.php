@@ -16,7 +16,7 @@ class ImportProgress implements ShouldBroadcastNow
 
     public function broadcastOn()
     {
-        return new Channel('imports');
+        return new Channel('import-progress.' . $this->progressData['progress_key']);
     }
 
     public function broadcastAs()

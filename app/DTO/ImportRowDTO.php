@@ -5,9 +5,9 @@ namespace App\DTO;
 class ImportRowDTO
 {
     public function __construct(
-        public mixed $id,
-        public mixed $name,
-        public mixed $date,
-        public int $rowNumber
+        public readonly mixed $id,
+        public readonly mixed $name,
+        public readonly mixed $date,
+        public readonly int $rowNumber
     ) {}
 }
