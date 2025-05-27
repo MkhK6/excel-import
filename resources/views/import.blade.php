@@ -15,7 +15,7 @@
                             <label for="file">Excel File (xlsx)</label>
                             <input type="file" class="form-control-file" id="file" name="file" accept=".xlsx" required>
                             <small class="form-text text-muted">
-                                File should have columns: id, name, date (d.m.Y format)
+                                File should have columns: id, name, date
                             </small>
                         </div>
 
@@ -114,7 +114,6 @@
         window.Echo.channel('imports')
             .listen('.import.progress', (e) => {
                 const progressData = e.progressData;
-                console.log(progressData);
                 updateProgress(progressData.processed, progressData.total);
             });
     });

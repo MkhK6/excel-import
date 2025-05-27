@@ -4,14 +4,16 @@ namespace App\Services\Import;
 
 use Carbon\Carbon;
 use App\DTO\ImportRowDTO;
+use Box\Spout\Common\Type;
 use App\Models\ImportedRow;
 use App\Events\ImportProgress;
+use Box\Spout\Common\Entity\Row;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Storage;
-use PhpOffice\PhpSpreadsheet\Reader\Xlsx;
 use Illuminate\Redis\Connections\Connection;
 use Illuminate\Validation\ValidationException;
 use App\Services\Import\Validators\RowValidator;
+use Box\Spout\Reader\Common\Creator\ReaderFactory;
 
 class ImportService
 {
@@ -43,77 +45,93 @@ class ImportService
         }
     }
 
+    public function getProgressKey(): string
+    {
+        return $this->progressKey;
+    }
+
     private function processFile(string $absolutePath): void
     {
-        $reader = new Xlsx();
-        $spreadsheet = $reader->load($absolutePath);
-        $worksheet = $spreadsheet->getActiveSheet();
-        $rows = $worksheet->toArray();
+        // Подсчёт количества строк
+        $reader = ReaderFactory::createFromType(Type::XLSX);
+        $reader->open($absolutePath);
+
+        $total = -1;
+        foreach ($reader->getSheetIterator() as $sheet) {
+            foreach ($sheet->getRowIterator() as $row) {
+                $total++;
+            }
+        }
+        $reader->close();
+
+        // Обработка данных
+        $reader = ReaderFactory::createFromType(Type::XLSX);
+        $reader->open($absolutePath);
 
         $processed = 0;
-        $total = count($rows) - 1;
+        $shouldFireEvent = false;
 
-        foreach ($rows as $index => $row) {
-            /** 
-             * TODO удалить sleep() 
-             */
-            sleep(2);
+        foreach ($reader->getSheetIterator() as $sheet) {
+            foreach ($sheet->getRowIterator() as $rowIndex => $row) {
+                if ($rowIndex === 1) continue;
 
-            if ($index === 0) continue;
+                try {
+                    $this->processRow($row, $rowIndex);
+                } catch (ValidationException $e) {
+                    $this->errors[$rowIndex] = $e->errors();
+                }
 
-            try {
-                $this->processRow($row, $index + 1);
-            } catch (ValidationException $e) {
-                $this->errors[$index + 1] = $e->errors();
+                $processed++;
+
+                if ($processed % 100 === 0) {
+                    $this->updateProgress($processed, $total);
+
+                    event(new ImportProgress([
+                        'processed' => $processed,
+                        'total' => $total
+                    ]));
+
+                    $shouldFireEvent = true;
+                }
             }
+        }
 
-            $processed++;
+        $reader->close();
+
+        if ($processed > 0 && !$shouldFireEvent) {
+            $this->updateProgress($processed, $total);
 
             event(new ImportProgress([
                 'processed' => $processed,
                 'total' => $total
             ]));
-
-            $this->updateProgress($processed, $total);
         }
     }
 
-    protected function normalizeDate(string $dateValue, $rowNumber): ?string
+    private function processRow(array|Row $row, int $rowNumber): void
     {
-        try {
-            $date = Carbon::parse($dateValue);
-            return $date->format('d.m.Y');
-        } catch (\Exception $e) {
-            $this->errors[$rowNumber][] = ['date' => ['Invalid date format']];
-            return null;
-        }
-    }
-
-    private function processRow(array $row, int $rowNumber): void
-    {
-        $dateValue = $row[2] ?? '';
-        $normalizedDate = $this->normalizeDate($dateValue, $rowNumber);
-
-        if ($normalizedDate === null) {
-            return;
-        }
+        $rowData = is_array($row) ? $row : $row->toArray();
 
         $dto = new ImportRowDTO(
-            id: $row[0] ?? null,
-            name: $row[1] ?? '',
-            date: $normalizedDate,
+            id: $rowData[0] ?? null,
+            name: $rowData[1] ?? null,
+            date: $rowData[2] ?? null,
             rowNumber: $rowNumber
         );
 
-        $validated = $this->validator->validate($dto);
+        try {
+            $validated = $this->validator->validate($dto);
 
-        $date = \Carbon\Carbon::createFromFormat('d.m.Y', $validated['date']);
+            $date = Carbon::createFromFormat('d.m.Y', $validated['date']);
 
-        ImportedRow::create([
-            'external_id' => $validated['id'],
-            'name' => $validated['name'],
-            'date' => $date->format('Y-m-d')
-        ]);
+            ImportedRow::create([
+                'external_id' => $validated['id'],
+                'name' => $validated['name'],
+                'date' => $date->format('Y-m-d')
+            ]);
+        } catch (ValidationException $e) {
+            $this->errors[$rowNumber] = $e->validator->errors()->all();
+        }
     }
 
     private function updateProgress(int $processed, int $total): void
@@ -123,23 +141,21 @@ class ImportService
 
     private function storeErrorReport(): void
     {
-        $reportContent = '';
+        $reportLines = [];
 
         foreach ($this->errors as $rowNumber => $errors) {
-            $errorMessages = [];
-
-            foreach ($errors as $fieldErrors) {
-                $errorMessages = array_merge($errorMessages, $fieldErrors);
-            }
-
-            $reportContent .= "{$rowNumber} - " . implode(', ', $errorMessages) . PHP_EOL;
+            $reportLines[] = sprintf(
+                "%d - %s",
+                $rowNumber,
+                implode(', ', $errors)
+            );
         }
 
-        Storage::disk('public')->put('result.txt', $reportContent);
-    }
-
-    public function getProgressKey(): string
-    {
-        return $this->progressKey;
+        if (!empty($reportLines)) {
+            Storage::disk('public')->put(
+                'result.txt',
+                implode(PHP_EOL, $reportLines)
+            );
+        }
     }
 }

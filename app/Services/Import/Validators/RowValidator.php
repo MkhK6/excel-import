@@ -18,26 +18,50 @@ class RowValidator
             'id' => $dto->id,
             'name' => $dto->name,
             'date' => $dto->date,
-            'row_number' => $dto->rowNumber
         ], [
-            'id' => 'nullable|integer',
+            'id' => 'required|integer',
             'name' => 'required|string|max:255',
             'date' => [
                 'required',
                 function ($attribute, $value, $fail) {
-                    try {
-                        Carbon::createFromFormat('d.m.Y', $value);
-                    } catch (\Exception $e) {
-                        $fail("The $attribute has invalid format. Expected d.m.Y");
+                    if (!$this->isValidDate($value)) {
+                        $fail("Неверный формат даты");
                     }
                 }
             ]
+        ], [
+            'required' => 'Поле обязательно для заполнения',
+            'integer' => 'Должно быть целым числом',
+            'string' => 'Должно быть строкой',
+            'max' => 'Максимальная длина :max символов',
         ]);
 
         if ($validator->fails()) {
             throw new ValidationException($validator);
         }
 
-        return $validator->validated();
+        $validated = $validator->validated();
+        $validated['date'] = $this->normalizeDate($validated['date']);
+
+        return $validated;
+    }
+
+    private function isValidDate(string $date): bool
+    {
+        try {
+            Carbon::parse($date);
+            return true;
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    private function normalizeDate(string $date): string
+    {
+        try {
+            return Carbon::parse($date)->format('d.m.Y');
+        } catch (\Exception $e) {
+            return $date;
+        }
     }
 }
