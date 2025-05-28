@@ -19,7 +19,10 @@ class ImportService
 {
     private Connection $redis;
     private string $progressKey;
-    private array $errors = [];
+
+    private const BATCH_SIZE = 500;
+
+    private array $batch = [];
 
     public function __construct(private RowValidator $validator)
     {
@@ -33,11 +36,11 @@ class ImportService
         }
 
         $this->progressKey = $progressKey;
-        $this->errors = [];
+        $this->batch = [];
 
         try {
             $this->processFile($absolutePath);
-            $this->storeErrorReport();
+            $this->flushBatch();
         } finally {
             if (file_exists($absolutePath)) {
                 unlink($absolutePath);
@@ -75,11 +78,7 @@ class ImportService
             foreach ($sheet->getRowIterator() as $rowIndex => $row) {
                 if ($rowIndex === 1) continue;
 
-                try {
-                    $this->processRow($row, $rowIndex);
-                } catch (ValidationException $e) {
-                    $this->errors[$rowIndex] = $e->errors();
-                }
+                $this->processRow($row, $rowIndex);
 
                 $processed++;
 
@@ -124,38 +123,35 @@ class ImportService
         try {
             $validated = $this->validator->validate($dto);
 
-            ImportedRow::create([
+            $this->batch[] = [
                 'external_id' => $validated['id'],
                 'name' => $validated['name'],
-                'date' => Carbon::parse($validated['date'])->format('d.m.Y')
-            ]);
+                'date' => Carbon::parse($validated['date'])->format('Y-m-d'),
+                'created_at' => now(),
+                'updated_at' => now()
+            ];
+
+            if (count($this->batch) >= self::BATCH_SIZE) {
+                $this->flushBatch();
+            }
         } catch (ValidationException $e) {
-            $this->errors[$rowNumber] = $e->validator->errors()->all();
+            Storage::disk('public')->append(
+                'result.txt',
+                "{$rowNumber} - " . implode(', ', $e->validator->errors()->all()) . PHP_EOL
+            );
+        }
+    }
+
+    private function flushBatch(): void
+    {
+        if (!empty($this->batch)) {
+            ImportedRow::insert($this->batch);
+            $this->batch = [];
         }
     }
 
     private function updateProgress(int $processed, int $total): void
     {
         $this->redis->set($this->progressKey, "{$processed}/{$total}");
-    }
-
-    private function storeErrorReport(): void
-    {
-        $reportLines = [];
-
-        foreach ($this->errors as $rowNumber => $errors) {
-            $reportLines[] = sprintf(
-                "%d - %s",
-                $rowNumber,
-                implode(', ', $errors)
-            );
-        }
-
-        if (!empty($reportLines)) {
-            Storage::disk('public')->put(
-                'result.txt',
-                implode(PHP_EOL, $reportLines)
-            );
-        }
     }
 }
